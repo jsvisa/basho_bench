@@ -22,7 +22,8 @@
 -module(basho_bench_driver_hub).
 
 -export([new/1,
-         run/4, valgen/1]).
+         run/4,
+         valgen/1]).
 
 -include("basho_bench.hrl").
 
@@ -30,7 +31,8 @@
 
 -record(state, { base_urls,
                  base_urls_index,
-                 path_params }).
+                 path_params,
+                 iter }).
 
 
 %% ====================================================================
@@ -80,7 +82,8 @@ new(Id) ->
 
     {ok, #state { base_urls = BaseUrls,
                   base_urls_index = BaseUrlsIndex,
-                  path_params = Params }}.
+                  path_params = Params,
+                  iter = ''}}.
 
 
 run(get, KeyGen, _ValueGen, State) ->
@@ -102,6 +105,17 @@ run(getx, KeyGen, _ValueGen, State) ->
             {ok, S2};
         {ok, _Url, _Headers} ->
             {ok, S2};
+        {error, Reason} ->
+            {error, Reason, S2}
+    end;
+run(getlist, KeyGen, _ValueGen, State) ->
+    {NextUrl, S2} = next_url(State),
+    Url = url(NextUrl, KeyGen, State#state.path_params, State#state.iter),
+    case do_getlist(Url, []) of
+        {not_found, _Url} ->
+            {ok, S2};
+        {ok, _Url, _Headers, Iter} ->
+            {ok, S2#state{iter = Iter}};
         {error, Reason} ->
             {error, Reason, S2}
     end;
@@ -164,14 +178,16 @@ next_url(State) ->
     { element(State#state.base_urls_index, State#state.base_urls),
       State#state { base_urls_index = State#state.base_urls_index + 1 }}.
 
-
-url(BaseUrl, Params) ->
-    BaseUrl#url { path = lists:concat([BaseUrl#url.path, Params]) }.
 url(BaseUrl, KeyGen, Params) when is_function(KeyGen) ->
     BaseUrl#url { path = lists:concat([BaseUrl#url.path, '/', KeyGen(), Params]) };
 url(BaseUrl, Key, Params) ->
     BaseUrl#url { path = lists:concat([BaseUrl#url.path, '/', Key, Params]) }.
 
+url(BaseUrl0, Key, Params, Iter) when is_binary(Iter)->
+    url(BaseUrl0, Key, Params, erlang:binary_to_list(Iter));
+url(BaseUrl0, Key, Params, Iter) ->
+    BaseUrl = url(BaseUrl0, Key, Params),
+    BaseUrl#url { path = lists:concat([BaseUrl#url.path, '?ls=true&iter=', Iter]) }.
 
 do_get(Url) ->
     do_get(Url, []).
@@ -188,6 +204,30 @@ do_get(Url, Opts) ->
                     {ok, Url, Header, Body};
                 false ->
                     {ok, Url, Header}
+            end;
+        {ok, Code, _Header, _Body} ->
+            {error, {http_error, Code}};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+do_getlist(Url, Opts) ->
+    case send_request(Url, [], get, [], [{response_format, binary}]) of
+        {ok, "404", _Header, _Body} ->
+            {not_found, Url};
+        {ok, "300", Header, _Body} ->
+            {ok, Url, Header};
+        {ok, "200", Header, Body} ->
+            case catch mochijson2:decode(Body) of
+                {struct, Fields} ->
+                    %% ?DEBUG("Fields is ~p~n", [Fields]),
+                    Iter = proplists:get_value(<<"iter">>, Fields),
+                    case proplists:get_bool(body_on_success, Opts) of
+                        true  -> {ok, Url, Header, Body, Iter};
+                        false -> {ok, Url, Header, Iter}
+                    end;
+                Error ->
+                    {error, Error}
             end;
         {ok, Code, _Header, _Body} ->
             {error, {http_error, Code}};
