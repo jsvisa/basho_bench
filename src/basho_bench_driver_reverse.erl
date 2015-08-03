@@ -88,7 +88,8 @@ run(get, KeyGen, _ValueGen, State) ->
     Url = url(NextUrl, KeyGen, State#state.path_params),
     case do_get(Url) of
         {not_found, _Url} ->
-            {error, {not_found, Url}, S2};
+            %% {error, {not_found, Url}, S2};
+            {ok, S2};
         {ok, _Url, _Headers} ->
             {ok, S2};
         {error, Reason} ->
@@ -110,7 +111,8 @@ run(delete, KeyGen, _ValueGen, State) ->
     Url = url(NextUrl, KeyGen, State#state.path_params),
     case do_delete(Url, []) of
         {not_found, _Url} ->
-            {error, {not_found, Url}, S2};
+            %% {error, {not_found, Url}, S2};
+            {ok, S2};
         ok ->
             {ok, S2};
         {error, Reason} ->
@@ -142,20 +144,23 @@ do_get(Url) ->
 
 do_get(Url, Opts) ->
     case send_request(Url, [], get, [], [{response_format, binary}]) of
-        {ok, "404", _Header, _Body} ->
-            {not_found, Url};
-        {ok, "300", Header, _Body} ->
-            {ok, Url, Header};
-        {ok, "200", Header, Body} ->
-            case proplists:get_bool(body_on_success, Opts) of
-                true ->
-                    {ok, Url, Header, Body};
-                false ->
-                    {ok, Url, Header}
+        {ok, Code, Header, Body} ->
+            io:format("> GET ~p '~p' ~n", [Url#url.path, Code]),
+            case Code of
+                "404" ->
+                    {not_found, Url};
+                "300" ->
+                    {ok, Url, Header};
+                "200" ->
+                    case proplists:get_bool(body_on_success, Opts) of
+                        true -> {ok, Url, Header, Body};
+                        false -> {ok, Url, Header}
+                    end;
+                Code ->
+                    {error, {http_error, Code}}
             end;
-        {ok, Code, _Header, _Body} ->
-            {error, {http_error, Code}};
         {error, Reason} ->
+            io:format("> GET ~p ERROR: '~p' ~n", [Url#url.path, Reason]),
             {error, Reason}
     end.
 
@@ -167,25 +172,30 @@ do_put(Url, Headers, ValueGen) ->
           end,
     case send_request(Url, Headers ++ [{'Content-Type', 'application/octet-stream'}],
                      put, Val, [{response_format, binary}]) of
-        {ok, "204", _Header, _Body} ->
-            ok;
-        {ok, "201", _Header, _Body} ->
-            ok;
         {ok, Code, _Header, _Body} ->
-            {error, {http_error, Code}};
+            io:format("> PUT ~p Body length is ~p '~p' ~n", [Url#url.path, byte_size(ValueGen()), Code]),
+            case Code of
+                "201" -> ok;
+                "204" -> ok;
+                Code -> {error, {http_error, Code}}
+            end;
         {error, Reason} ->
+            io:format("> PUT ~p Body length is ~p ERROR: '~p' ~n", [Url#url.path, byte_size(ValueGen()), Reason]),
             {error, Reason}
     end.
 
 do_delete(Url, Headers) ->
+    io:format("> DELETE ~p ~n", [Url#url.path]),
     case send_request(Url, Headers, delete, [], []) of
-        {ok, "404", _Header, _Body} ->
-            {not_found, Url};
-        {ok, "204", _Header, _Body} ->
-            ok;
         {ok, Code, _Header, _Body} ->
-            {error, {http_error, Code}};
+            io:format("> DELETE ~p '~p' ~n", [Url#url.path, Code]),
+            case Code of
+                "204" -> ok;
+                "404" -> {not_found, Url};
+                Code -> {error, {http_error, Code}}
+            end;
         {error, Reason} ->
+            io:format("> DELETE ~p Error: ~p ~n", [Url#url.path, Reason]),
             {error, Reason}
     end.
 
