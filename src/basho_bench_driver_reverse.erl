@@ -87,10 +87,9 @@ run(get, KeyGen, _ValueGen, State) ->
     {NextUrl, S2} = next_url(State),
     Url = url(NextUrl, KeyGen, State#state.path_params),
     case do_get(Url) of
-        {not_found, _Url} ->
-            %% {error, {not_found, Url}, S2};
-            {ok, S2};
         {ok, _Url, _Headers} ->
+            {ok, S2};
+        {error, {notfound, _Url}} ->
             {ok, S2};
         {error, Reason} ->
             {error, Reason, S2}
@@ -117,8 +116,18 @@ run(delete, KeyGen, _ValueGen, State) ->
             {ok, S2};
         {error, Reason} ->
             {error, Reason, S2}
+    end;
+run(putget, KeyGen, ValueGen, State) ->
+    {NextUrl, S2} = next_url(State),
+    Url = url(NextUrl, KeyGen, State#state.path_params),
+    case do_putget(Url, [], ValueGen) of
+        ok ->
+            {ok, S2};
+        {error, Reason} ->
+            {error, Reason, S2}
     end.
 
+%
 %% ====================================================================
 %% Internal functions
 %% ====================================================================
@@ -148,12 +157,12 @@ do_get(Url, Opts) ->
             io:format("> GET ~p '~p' ~n", [Url#url.path, Code]),
             case Code of
                 "404" ->
-                    {not_found, Url};
+                    {error, {notfound, Url}};
                 "300" ->
                     {ok, Url, Header};
                 "200" ->
                     case proplists:get_bool(body_on_success, Opts) of
-                        true -> {ok, Url, Header, Body};
+                        true  -> {ok, Url, Header, Body};
                         false -> {ok, Url, Header}
                     end;
                 Code ->
@@ -173,14 +182,49 @@ do_put(Url, Headers, ValueGen) ->
     case send_request(Url, Headers ++ [{'Content-Type', 'application/octet-stream'}],
                      put, Val, [{response_format, binary}]) of
         {ok, Code, _Header, _Body} ->
-            io:format("> PUT ~p Body length is ~p '~p' ~n", [Url#url.path, byte_size(ValueGen()), Code]),
+            io:format("> PUT ~p Body length is ~p '~p' ~n",
+                      [Url#url.path, byte_size(ValueGen()), Code]),
             case Code of
                 "201" -> ok;
                 "204" -> ok;
                 Code -> {error, {http_error, Code}}
             end;
         {error, Reason} ->
-            io:format("> PUT ~p Body length is ~p ERROR: '~p' ~n", [Url#url.path, byte_size(ValueGen()), Reason]),
+            io:format("> PUT ~p Body length is ~p ERROR: '~p' ~n",
+                      [Url#url.path, byte_size(ValueGen()), Reason]),
+            {error, Reason}
+    end.
+
+do_putget(Url, Headers, ValueGen) ->
+    Val = if is_function(ValueGen) ->
+                ValueGen();
+            true ->
+               ValueGen
+          end,
+    case send_request(Url, Headers ++ [{'Content-Type', 'application/octet-stream'}],
+                     put, Val, [{response_format, binary}]) of
+        {ok, Code, _Header, _Body} ->
+            io:format("> PUT ~p Body length is ~p '~p' ~n",
+                      [Url#url.path, byte_size(ValueGen()), Code]),
+            if Code =:= "201" orelse Code =:= "204" ->
+                    case do_get(Url, [{body_on_success, true}]) of
+                        {ok, Url, _Header2, Body} ->
+                            if Body =:= Val ->
+                                    io:format("> GOT ~p Body the same as puted!~n", [Url#url.path]),
+                                    ok;
+                                true ->
+                                    io:format("> GOT ~p Body NOT THE Same as puted!~n", [Url#url.path]),
+                                    {error, get_body_error}
+                            end;
+                        Error ->
+                            Error
+                    end;
+                true ->
+                    {error, {http_error, Code}}
+            end;
+        {error, Reason} ->
+            io:format("> PUT ~p Body length is ~p ERROR: '~p' ~n",
+                      [Url#url.path, byte_size(ValueGen()), Reason]),
             {error, Reason}
     end.
 

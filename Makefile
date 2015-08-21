@@ -3,6 +3,9 @@
 all: deps compile
 	./rebar skip_deps=true escriptize
 
+reverse: all
+	./basho_bench examples/reverse.putget.config
+
 deps:
 	./rebar get-deps
 
