@@ -118,6 +118,8 @@ new({truncated_pareto_int, MaxKey}, Id) ->
     fun() -> erlang:min(MaxKey, Pareto()) end;
 new(uuid_v4, _Id) ->
     fun() -> basho_uuid:v4() end;
+new(uuid_v4str, _Id) ->
+    fun() -> basho_uuid:to_string(basho_uuid:v4()) end;
 new({function, Module, Function, Args}, Id)
   when is_atom(Module), is_atom(Function), is_list(Args) ->
     case code:ensure_loaded(Module) of

@@ -29,6 +29,7 @@
 -record(url, {abspath, host, port, username, password, path, protocol, host_type}).
 
 -record(state, { base_urls,
+                 log_device,
                  base_urls_index,
                  path_params }).
 
@@ -56,6 +57,7 @@ new(Id) ->
     Path = basho_bench_config:get(reverse_path, "/objects/reverse/bucket/key"),
     Params = basho_bench_config:get(reverse_params, ""),
     Disconnect = basho_bench_config:get(reverse_disconnect_frequency, infinity),
+    LogFile = basho_bench_config:get(reverse_log_file, "/tmp/access.log"),
 
     case Disconnect of
         infinity ->
@@ -77,16 +79,18 @@ new(Id) ->
     BaseUrls = list_to_tuple([#url{host=IP, port=Port, path=Path}
                               || {IP, Port} <- Targets]),
     BaseUrlsIndex = random:uniform(tuple_size(BaseUrls)),
+    {ok, Device} = file:open(LogFile, [write, append]),
 
     {ok, #state { base_urls = BaseUrls,
+                  log_device = Device,
                   base_urls_index = BaseUrlsIndex,
                   path_params = Params }}.
 
 
-run(get, KeyGen, _ValueGen, State) ->
+run(get, KeyGen, _ValueGen, #state{log_device=Device}=State) ->
     {NextUrl, S2} = next_url(State),
     Url = url(NextUrl, KeyGen, State#state.path_params),
-    case do_get(Url) of
+    case do_get(Url, Device) of
         {ok, _Url, _Headers} ->
             {ok, S2};
         {error, {notfound, _Url}} ->
@@ -94,10 +98,10 @@ run(get, KeyGen, _ValueGen, State) ->
         {error, Reason} ->
             {error, Reason, S2}
     end;
-run(put, KeyGen, ValueGen, State) ->
+run(put, KeyGen, ValueGen, #state{log_device=Device}=State) ->
     {NextUrl, S2} = next_url(State),
     Url = url(NextUrl, KeyGen, State#state.path_params),
-    case do_put(Url, [], ValueGen) of
+    case do_put(Url, Device, [], ValueGen) of
         {no_content, _Url} ->
             {error, {no_content, Url}, S2};
         ok ->
@@ -105,10 +109,10 @@ run(put, KeyGen, ValueGen, State) ->
         {error, Reason} ->
             {error, Reason, S2}
     end;
-run(delete, KeyGen, _ValueGen, State) ->
+run(delete, KeyGen, _ValueGen, #state{log_device=Device}=State) ->
     {NextUrl, S2} = next_url(State),
     Url = url(NextUrl, KeyGen, State#state.path_params),
-    case do_delete(Url, []) of
+    case do_delete(Url, Device, []) of
         {not_found, _Url} ->
             %% {error, {not_found, Url}, S2};
             {ok, S2};
@@ -117,10 +121,10 @@ run(delete, KeyGen, _ValueGen, State) ->
         {error, Reason} ->
             {error, Reason, S2}
     end;
-run(putget, KeyGen, ValueGen, State) ->
+run(putget, KeyGen, ValueGen, #state{log_device=Device}=State) ->
     {NextUrl, S2} = next_url(State),
     Url = url(NextUrl, KeyGen, State#state.path_params),
-    case do_putget(Url, [], ValueGen) of
+    case do_putget(Url, Device, [], ValueGen) of
         ok ->
             {ok, S2};
         {error, Reason} ->
@@ -148,13 +152,13 @@ url(BaseUrl, Key, Params) ->
     BaseUrl#url { path = lists:concat([BaseUrl#url.path, '/', Key, Params]) }.
 
 
-do_get(Url) ->
-    do_get(Url, []).
+do_get(Url, IoDevice) ->
+    do_get(Url, IoDevice, []).
 
-do_get(Url, Opts) ->
+do_get(Url, IoDevice, Opts) ->
     case send_request(Url, [], get, [], [{response_format, binary}]) of
         {ok, Code, Header, Body} ->
-            io:format("> GET ~p '~p' ~n", [Url#url.path, Code]),
+            file:write(IoDevice, io_lib:format("> GET ~p '~p' ~n", [Url#url.path, Code])),
             case Code of
                 "404" ->
                     {error, {notfound, Url}};
@@ -169,11 +173,11 @@ do_get(Url, Opts) ->
                     {error, {http_error, Code}}
             end;
         {error, Reason} ->
-            io:format("> GET ~p ERROR: '~p' ~n", [Url#url.path, Reason]),
+            file:write(IoDevice, io_lib:format("> GET ~p ERROR: '~p' ~n", [Url#url.path, Reason])),
             {error, Reason}
     end.
 
-do_put(Url, Headers, ValueGen) ->
+do_put(Url, IoDevice, Headers, ValueGen) ->
     Val = if is_function(ValueGen) ->
                 ValueGen();
             true ->
@@ -182,20 +186,22 @@ do_put(Url, Headers, ValueGen) ->
     case send_request(Url, Headers ++ [{'Content-Type', 'application/octet-stream'}],
                      put, Val, [{response_format, binary}]) of
         {ok, Code, _Header, _Body} ->
-            io:format("> PUT ~p Body length is ~p '~p' ~n",
-                      [Url#url.path, byte_size(ValueGen()), Code]),
+            Log = io_lib:format("> PUT ~p Body length is ~p '~p' ~n",
+                                [Url#url.path, byte_size(ValueGen()), Code]),
+            file:write(IoDevice, Log),
             case Code of
                 "201" -> ok;
                 "204" -> ok;
                 Code -> {error, {http_error, Code}}
             end;
         {error, Reason} ->
-            io:format("> PUT ~p Body length is ~p ERROR: '~p' ~n",
-                      [Url#url.path, byte_size(ValueGen()), Reason]),
+            Log = io_lib:format("> PUT ~p Body length is ~p ERROR: '~p' ~n",
+                                [Url#url.path, byte_size(ValueGen()), Reason]),
+            file:write(IoDevice, Log),
             {error, Reason}
     end.
 
-do_putget(Url, Headers, ValueGen) ->
+do_putget(Url, IoDevice, Headers, ValueGen) ->
     Val = if is_function(ValueGen) ->
                 ValueGen();
             true ->
@@ -204,16 +210,20 @@ do_putget(Url, Headers, ValueGen) ->
     case send_request(Url, Headers ++ [{'Content-Type', 'application/octet-stream'}],
                      put, Val, [{response_format, binary}]) of
         {ok, Code, _Header, _Body} ->
-            io:format("> PUT ~p Body length is ~p '~p' ~n",
-                      [Url#url.path, byte_size(ValueGen()), Code]),
+            Log = io_lib:format("> PUT ~p Body length is ~p '~p' ~n",
+                                [Url#url.path, byte_size(ValueGen()), Code]),
+            file:write(IoDevice, Log),
+
             if Code =:= "201" orelse Code =:= "204" ->
                     case do_get(Url, [{body_on_success, true}]) of
                         {ok, Url, _Header2, Body} ->
                             if Body =:= Val ->
-                                    io:format("> GOT ~p Body the same as puted!~n", [Url#url.path]),
+                                    Log0 = io_lib:format("> GOT ~p Body the same as puted!~n", [Url#url.path]),
+                                    file:write(IoDevice, Log0),
                                     ok;
                                 true ->
-                                    io:format("> GOT ~p Body NOT THE Same as puted!~n", [Url#url.path]),
+                                    Log0 = io_lib:format("> GOT ~p Body NOT THE Same as puted!~n", [Url#url.path]),
+                                    file:write(IoDevice, Log0),
                                     {error, get_body_error}
                             end;
                         Error ->
@@ -223,23 +233,26 @@ do_putget(Url, Headers, ValueGen) ->
                     {error, {http_error, Code}}
             end;
         {error, Reason} ->
-            io:format("> PUT ~p Body length is ~p ERROR: '~p' ~n",
-                      [Url#url.path, byte_size(ValueGen()), Reason]),
+            Log = io_lib:format("> PUT ~p Body length is ~p ERROR: '~p' ~n",
+                                [Url#url.path, byte_size(ValueGen()), Reason]),
+            file:write(IoDevice, Log),
             {error, Reason}
     end.
 
-do_delete(Url, Headers) ->
-    io:format("> DELETE ~p ~n", [Url#url.path]),
+do_delete(Url, IoDevice, Headers) ->
     case send_request(Url, Headers, delete, [], []) of
         {ok, Code, _Header, _Body} ->
-            io:format("> DELETE ~p '~p' ~n", [Url#url.path, Code]),
+            Log = io_lib:format("> DELETE ~p '~p' ~n", [Url#url.path, Code]),
+            file:write(IoDevice, Log),
+
             case Code of
                 "204" -> ok;
                 "404" -> {not_found, Url};
                 Code -> {error, {http_error, Code}}
             end;
         {error, Reason} ->
-            io:format("> DELETE ~p Error: ~p ~n", [Url#url.path, Reason]),
+            Log = io_lib:format("> DELETE ~p Error: ~p ~n", [Url#url.path, Reason]),
+            file:write(IoDevice, Log),
             {error, Reason}
     end.
 
