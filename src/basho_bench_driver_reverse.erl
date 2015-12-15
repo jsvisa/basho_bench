@@ -90,7 +90,9 @@ new(Id) ->
 run(get, KeyGen, _ValueGen, #state{log_device=Device}=State) ->
     {NextUrl, S2} = next_url(State),
     Url = url(NextUrl, KeyGen, State#state.path_params),
-    case do_get(Url, Device) of
+    case do_get(Url, Device, [{body_on_success, true}]) of
+        {ok, _Url, _Headers, _Body} ->
+            {ok, S2};
         {ok, _Url, _Headers} ->
             {ok, S2};
         {error, {notfound, _Url}} ->
@@ -147,18 +149,19 @@ next_url(State) ->
 
 
 url(BaseUrl, KeyGen, Params) when is_function(KeyGen) ->
-    BaseUrl#url { path = lists:concat([BaseUrl#url.path, '/', KeyGen(), Params]) };
+    case KeyGen() of
+        Key when is_binary(Key) ->
+            url(BaseUrl, erlang:binary_to_list(Key), Params);
+        Key when is_list(Key) ->
+            url(BaseUrl, Key, Params)
+    end;
 url(BaseUrl, Key, Params) ->
     BaseUrl#url { path = lists:concat([BaseUrl#url.path, '/', Key, Params]) }.
-
-
-do_get(Url, IoDevice) ->
-    do_get(Url, IoDevice, []).
 
 do_get(Url, IoDevice, Opts) ->
     case send_request(Url, [], get, [], [{response_format, binary}]) of
         {ok, Code, Header, Body} ->
-            file:write(IoDevice, io_lib:format("> GET ~p '~p' ~n", [Url#url.path, Code])),
+            file:write(IoDevice, io_lib:format("> GET ~p '~p' '~p' ~n", [Url#url.path, Code, byte_size(Body)])),
             case Code of
                 "404" ->
                     {error, {notfound, Url}};
@@ -166,8 +169,15 @@ do_get(Url, IoDevice, Opts) ->
                     {ok, Url, Header};
                 "200" ->
                     case proplists:get_bool(body_on_success, Opts) of
-                        true  -> {ok, Url, Header, Body};
-                        false -> {ok, Url, Header}
+                        true ->
+                            {"content-length", L0} = lists:keyfind("content-length", 1, Header),
+                            Len = erlang:list_to_integer(L0),
+                            case byte_size(Body) of
+                                Len -> {ok, Url, Header, Body};
+                                BoL -> {error, {{content_length, Len}, {body_length, BoL}}}
+                            end;
+                        false ->
+                            {ok, Url, Header}
                     end;
                 Code ->
                     {error, {http_error, Code}}
@@ -215,7 +225,7 @@ do_putget(Url, IoDevice, Headers, ValueGen) ->
             file:write(IoDevice, Log),
 
             if Code =:= "201" orelse Code =:= "204" ->
-                    case do_get(Url, [{body_on_success, true}]) of
+                    case do_get(Url, IoDevice, [{body_on_success, true}]) of
                         {ok, Url, _Header2, Body} ->
                             if Body =:= Val ->
                                     Log0 = io_lib:format("> GOT ~p Body the same as puted!~n", [Url#url.path]),
