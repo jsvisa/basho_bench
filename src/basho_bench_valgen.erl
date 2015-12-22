@@ -64,6 +64,55 @@ new({uniform_int, MaxVal}, _Id)
 new({uniform_int, MinVal, MaxVal}, _Id)
   when is_integer(MinVal), is_integer(MaxVal), MaxVal > MinVal ->
     fun() -> random:uniform(MinVal, MaxVal) end;
+new({file_line_bin, Path}, Id) ->
+    new({file_line_bin, Path, repeat}, Id);
+new({file_line_bin, Path, DoRepeat}, Id) ->
+    Open = fun() ->
+               Opts = [read, raw, binary, {read_ahead, 16*1024*1024}],
+               {ok, FileH} = file:open(Path, Opts),
+               FileH
+           end,
+    Chomp = fun(LineBin) ->
+                WantedLen = byte_size(LineBin) - 1,
+                <<Chomped:WantedLen/binary, _/binary>> = LineBin,
+                Chomped
+            end,
+    Loop = fun(L, FH) ->
+               {Line, FH2}  = case file:read_line(FH) of
+                                {ok, LineBin} ->
+                                    {Chomp(LineBin), FH};
+                                eof when DoRepeat /= repeat ->
+                                    {empty_valgen, FH};
+                                eof ->
+                                    ?INFO("CURRENT EOF, REOPEN!", []),
+                                    file:close(FH),
+                                    FH_ = Open(),
+                                    {ok, LineBin} = file:read_line(FH_),
+                                    {Chomp(LineBin), FH_}
+                              end,
+                receive
+                    {val_req, From} -> From ! {val_reply, Line}
+                end,
+                L(L, FH2)
+           end,
+    if Id == 1 ->
+            spawn(fun() ->
+                        register(file_valgen, self()),
+                        FH = Open(),
+                        Loop(Loop, FH)
+                end);
+        true ->
+            ok
+    end,
+    fun() ->
+            file_valgen ! {val_req, self()},
+            receive
+                {val_reply, empty_valgen} ->
+                    throw({stop, empty_valgen});
+                {val_reply, Bin} ->
+                    Bin
+            end
+    end;
 new(Other, _Id) ->
     ?FAIL_MSG("Invalid value generator requested: ~p\n", [Other]).
 
