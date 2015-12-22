@@ -358,6 +358,7 @@ send_request(Url, Headers, Method, Body, Options, Count) ->
             maybe_disconnect(Url),
             {ok, Status, RespHeaders, RespBody};
         Error ->
+            lager:error("ERROR ~p ~p ~p~n", [Method, Url, Error]),
             clear_disconnect_freq(Url),
             disconnect(Url),
             case should_retry(Error) of
