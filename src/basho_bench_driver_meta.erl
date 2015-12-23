@@ -85,11 +85,14 @@ new(Id) ->
                   base_urls_index = BaseUrlsIndex,
                   path_params = Params }}.
 
+run(get, _KeyGen, ValueGen, #state{log_device=Device}=State) ->
+    Json = json_from_value(ValueGen),
+    Key0 = proplists:get_value(<<"key">>, Json),
+    Key = binary:bin_to_list(Key0),
 
-run(get, KeyGen, _ValueGen, #state{log_device=Device}=State) ->
     {NextUrl, S2} = next_url(State),
-    Url = url(NextUrl, KeyGen, State#state.path_params),
-    case do_get(Url, Device, [{body_on_success, true}]) of
+    Url = url(NextUrl, Key, State#state.path_params),
+    case do_get(Url, Device, [{body_on_success, true}], Json) of
         {ok, _Url, _Headers, _Body} ->
             {ok, S2};
         {ok, _Url, _Headers} ->
@@ -102,8 +105,9 @@ run(get, KeyGen, _ValueGen, #state{log_device=Device}=State) ->
 run(put, KeyGen, ValueGen, #state{log_device=Device}=State) ->
     {NextUrl, S2} = next_url(State),
     Url = url(NextUrl, KeyGen, State#state.path_params),
+
     case do_put(Url, Device, [], ValueGen) of
-        {no_content, _Url} ->
+        {no_content, _Url} ->                                               %% FIXME what dose its job? 
             {error, {no_content, Url}, S2};
         ok ->
             {ok, S2};
@@ -150,7 +154,7 @@ next_url(State) ->
 url(BaseUrl, KeyGen, Params) when is_function(KeyGen) ->
     case KeyGen() of
         Key when is_binary(Key) ->
-            url(BaseUrl, erlang:binary_to_list(Key), Params);
+            url(BaseUrl, erlang:bin_to_list(Key), Params);
         Key when is_list(Key) ->
             url(BaseUrl, Key, Params)
     end;
@@ -158,6 +162,9 @@ url(BaseUrl, Key, Params) ->
     BaseUrl#url { path = lists:concat([BaseUrl#url.path, '/', Key, Params]) }.
 
 do_get(Url, IoDevice, Opts) ->
+    do_get(Url, IoDevice, [{body_on_success, false} | Opts], []).
+
+do_get(Url, IoDevice, Opts, Json) ->
     case send_request(Url, [], get, [], [{response_format, binary}]) of
         {ok, Code, Header, Body} ->
             file:write(IoDevice, io_lib:format("> GET ~p '~p' '~p' ~n", [Url#url.path, Code, byte_size(Body)])),
@@ -169,11 +176,9 @@ do_get(Url, IoDevice, Opts) ->
                 "200" ->
                     case proplists:get_bool(body_on_success, Opts) of
                         true ->
-                            {"content-length", L0} = lists:keyfind("content-length", 1, Header),
-                            Len = erlang:list_to_integer(L0),
-                            case byte_size(Body) of
-                                Len -> {ok, Url, Header, Body};
-                                BoL -> {error, {{content_length, Len}, {body_length, BoL}}}
+                            case validate_meta(Body, Json) of
+                                [] -> {ok, Url, Header};
+                                Error -> {error, Error}
                             end;
                         false ->
                             {ok, Url, Header}
@@ -386,3 +391,46 @@ normalize_error(Method, {'EXIT', Reason}) ->
     {error, {Method, 'EXIT', Reason}};
 normalize_error(Method, {error, Reason}) ->
     {error, {Method, Reason}}.
+
+json_from_value(ValueGen) ->
+    Body = case is_function(ValueGen) of
+                true -> ValueGen();
+                false -> ValueGen
+            end,
+    jsx:decode(Body).
+
+validate_meta(Body0, Json0) ->
+    Body = lists:map(fun({Key, Value}) -> {binary:bin_to_list(Key), Value} end, jsx:decode(Body0)),
+    Json = lists:map(fun({Key, Value}) -> {binary:bin_to_list(Key), Value} end, Json0),
+
+    Fun = fun(Key, Acc) ->
+                  {Key, CValue} = lists:keyfind(Key, 1, Body),
+                  {Key, EValue} = lists:keyfind(Key, 1, Json),
+                  case CValue == EValue of
+                      true -> Acc;
+                      false -> [{{lists:concat(["get_", Key]), CValue}, {lists:concat(["expect_", Key]), EValue}} | Acc]
+                  end
+          end,
+    Keys = ["content_length", "content_type", "content_md5", "created_at", "block_size", "cluster_id"],
+    Result1 = lists:foldl(Fun, [], Keys),
+
+    % block_uuid
+    {"block_uuid", CUUID0} = lists:keyfind("block_uuid", 1, Body),
+    {"block_uuid", EUUID}  = lists:keyfind("block_uuid", 1, Json),
+    CUUID = binary:replace(CUUID0, <<"-">>, <<"">>, [global]),
+    Result2 = case CUUID == EUUID of
+                  true -> Result1;
+                  false -> [{{"get_block_uuid", CUUID}, {"expect_block_uuid", EUUID}} | Result1]
+              end,
+
+    % metadata
+    {"metadata", CMetadata0} = lists:keyfind("metadata", 1, Body),
+    {"metadata", EMetadata0} = lists:keyfind("metadata", 1, Json),
+    CMetadata = ordsets:from_list(CMetadata0),
+    EMetadata = ordsets:from_list(EMetadata0),
+    Result3 = case CMetadata == EMetadata of
+                  true -> Result2;
+                  false -> [{{"get_metadata", CMetadata}, {"expect_metadata", EMetadata}} | Result2]
+              end,
+
+    Result3.
