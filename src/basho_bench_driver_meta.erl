@@ -107,7 +107,7 @@ run(put, KeyGen, ValueGen, #state{log_device=Device}=State) ->
     Url = url(NextUrl, KeyGen, State#state.path_params),
 
     case do_put(Url, Device, [], ValueGen) of
-        {no_content, _Url} ->                                               %% FIXME what dose its job? 
+        {no_content, _Url} ->   %% FIXME what dose its job?
             {error, {no_content, Url}, S2};
         ok ->
             {ok, S2};
@@ -136,7 +136,6 @@ run(putget, KeyGen, ValueGen, #state{log_device=Device}=State) ->
             {error, Reason, S2}
     end.
 
-%
 %% ====================================================================
 %% Internal functions
 %% ====================================================================
@@ -167,7 +166,7 @@ do_get(Url, IoDevice, Opts) ->
 do_get(Url, IoDevice, Opts, Json) ->
     case send_request(Url, [], get, [], [{response_format, binary}]) of
         {ok, Code, Header, Body} ->
-            file:write(IoDevice, io_lib:format("> GET ~p '~p' '~p' ~n", [Url#url.path, Code, byte_size(Body)])),
+            file:write(IoDevice, io_lib:format("> GET ~p '~p' ~n", [Url#url.path, Code])),
             case Code of
                 "404" ->
                     {error, {notfound, Url}};
@@ -176,7 +175,7 @@ do_get(Url, IoDevice, Opts, Json) ->
                 "200" ->
                     case proplists:get_bool(body_on_success, Opts) of
                         true ->
-                            case validate_meta(Body, Json) of
+                            case validate_meta(jsx:decode(Body), Json) of
                                 [] -> {ok, Url, Header};
                                 Error -> {error, Error}
                             end;
@@ -400,19 +399,19 @@ json_from_value(ValueGen) ->
     jsx:decode(Body).
 
 validate_meta(Body0, Json0) ->
-    Body = lists:map(fun({Key, Value}) -> {binary:bin_to_list(Key), Value} end, jsx:decode(Body0)),
+    Body = lists:map(fun({Key, Value}) -> {binary:bin_to_list(Key), Value} end, Body0),
     Json = lists:map(fun({Key, Value}) -> {binary:bin_to_list(Key), Value} end, Json0),
 
-    Fun = fun(Key, Acc) ->
-                  {Key, CValue} = lists:keyfind(Key, 1, Body),
-                  {Key, EValue} = lists:keyfind(Key, 1, Json),
-                  case CValue == EValue of
-                      true -> Acc;
-                      false -> [{{lists:concat(["get_", Key]), CValue}, {lists:concat(["expect_", Key]), EValue}} | Acc]
-                  end
-          end,
-    Keys = ["content_length", "content_type", "content_md5", "created_at", "block_size", "cluster_id"],
-    Result1 = lists:foldl(Fun, [], Keys),
+    Validater = fun(Key, Acc) ->
+            {Key, CValue} = lists:keyfind(Key, 1, Body),
+            {Key, EValue} = lists:keyfind(Key, 1, Json),
+            case CValue == EValue of
+                true -> Acc;
+                false -> [{{lists:concat(["get_", Key]), CValue}, {lists:concat(["expect_", Key]), EValue}} | Acc]
+            end
+        end,
+    Items = ["content_length", "content_type", "content_md5", "created_at", "block_size", "cluster_id"],
+    Result1 = lists:foldl(Validater, [], Items),
 
     % block_uuid
     {"block_uuid", CUUID0} = lists:keyfind("block_uuid", 1, Body),
