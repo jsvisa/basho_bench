@@ -358,7 +358,7 @@ send_request(Url, Headers, Method, Body, Options, Count) ->
             maybe_disconnect(Url),
             {ok, Status, RespHeaders, RespBody};
         Error ->
-            lager:error("ERROR ~p ~p ~p~n", [Method, Url, Error]),
+            lager:error("ERROR ~p ~p ~p~n", [Method, Url#url.path, Error]),
             clear_disconnect_freq(Url),
             disconnect(Url),
             case should_retry(Error) of
@@ -369,17 +369,12 @@ send_request(Url, Headers, Method, Body, Options, Count) ->
             end
     end.
 
-
-should_retry({error, send_failed}) ->
-    true;
-should_retry({error, connection_closed}) ->
-    true;
-should_retry({'EXIT', {normal, _}}) ->
-    true;
-should_retry({'EXIT', {noproc, _}}) ->
-    true;
-should_retry(_) ->
-    false.
+should_retry({error, send_failed})          -> true;
+should_retry({error, connection_closed})    -> true;
+should_retry({error, connection_closing})   -> true;
+should_retry({'EXIT', {normal, _}})         -> true;
+should_retry({'EXIT', {noproc, _}})         -> true;
+should_retry(_)                             -> false.
 
 normalize_error(Method, {'EXIT', {timeout, _}}) ->
     {error, {Method, timeout}};

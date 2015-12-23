@@ -21,7 +21,7 @@
                    "840acab51ebfb731de0137d9c6d41e7db4a12793"}},
        {ibrowse,".*",
                 {git,"git://github.com/cmullaparthi/ibrowse.git",
-                     "e8ae353c16d4f0897abb9f80025b52925b974dd1"}},
+                     "a1be5369c94920e3fbb8729ac81125524acb56a6"}},
        {protobuffs,".*",
                    {git,"git://github.com/basho/erlang_protobuffs.git",
                         "a1eeee77aef639a33cc5a2dd7abed7e4f4b83f9b"}},
@@ -77,6 +77,6 @@
 {plugins,[rebar_lock_deps_plugin]}.
 {escript_incl_apps,[bear,casbench,cqerl,folsom,getopt,goldrush,ibrowse,katja,
                     lager,lz4,mochiweb,node_package,protobuffs,riak_pb,riakc,
-                    snappy]}.
+                    snappy,jsx]}.
 {escript_emu_args,"%%! +K true -rsh ssh -noshell -noinput +P 1222333 +Q 1222333 +zdbbl 32768\n"}.
 
