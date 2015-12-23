@@ -199,6 +199,7 @@ do_put(Url, IoDevice, Headers, ValueGen) ->
                                 [Url#url.path, byte_size(ValueGen()), Code]),
             file:write(IoDevice, Log),
             case Code of
+                "200" -> ok;
                 "201" -> ok;
                 "204" -> ok;
                 Code -> {error, {http_error, Code}}
