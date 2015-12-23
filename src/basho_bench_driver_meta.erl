@@ -195,8 +195,7 @@ do_put(Url, IoDevice, Headers, ValueGen) ->
     case send_request(Url, Headers ++ [{'Content-Type', 'application/json'}],
                       post, Val, [{response_format, binary}]) of
         {ok, Code, _Header, _Body} ->
-            Log = io_lib:format("> PUT ~p Body length is ~p '~p' ~n",
-                                [Url#url.path, byte_size(ValueGen()), Code]),
+            Log = io_lib:format("> PUT ~p '~p' ~n", [proplists:get_value(<<"key">>, jsx:decode(Val), ""), Code]),
             file:write(IoDevice, Log),
             case Code of
                 "200" -> ok;

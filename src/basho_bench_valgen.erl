@@ -67,9 +67,9 @@ new({uniform_int, MinVal, MaxVal}, _Id)
 new({file_line_bin, Path}, Id) ->
     new({file_line_bin, Path, repeat}, Id);
 new({file_line_bin, Path, DoRepeat}, Id) ->
-    Open = fun() ->
+    Open = fun(File) ->
                Opts = [read, raw, binary, {read_ahead, 16*1024*1024}],
-               {ok, FileH} = file:open(Path, Opts),
+               {ok, FileH} = file:open(File, Opts),
                FileH
            end,
     Chomp = fun(LineBin) ->
@@ -77,29 +77,45 @@ new({file_line_bin, Path, DoRepeat}, Id) ->
                 <<Chomped:WantedLen/binary, _/binary>> = LineBin,
                 Chomped
             end,
-    Loop = fun(L, FH) ->
-               {Line, FH2}  = case file:read_line(FH) of
-                                {ok, LineBin} ->
-                                    {Chomp(LineBin), FH};
-                                eof when DoRepeat /= repeat ->
-                                    {empty_valgen, FH};
-                                eof ->
-                                    ?INFO("CURRENT EOF, REOPEN!", []),
-                                    file:close(FH),
-                                    FH_ = Open(),
-                                    {ok, LineBin} = file:read_line(FH_),
-                                    {Chomp(LineBin), FH_}
-                              end,
-                receive
-                    {val_req, From} -> From ! {val_reply, Line}
-                end,
-                L(L, FH2)
-           end,
+    Loop = fun(L, FH, Repeat) ->
+            {Line, FH2, NewRepeat}  = case file:read_line(FH) of
+                {ok, LineBin} ->
+                    {Chomp(LineBin), FH, Repeat};
+                eof when Repeat == norepeat ->
+                    file:close(FH),
+                    {empty_valgen, FH, Repeat};
+                eof when Repeat == [] ->
+                    file:close(FH),
+                    {empty_valgen, FH, []};
+                eof when is_list(Repeat) ->
+                    [Seq | RestRepeat] = Repeat,
+                    file:close(FH),
+                    FH_ = Open(filename:join(Path, Seq)),
+                    {ok, LineBin} = file:read_line(FH_),
+                    {Chomp(LineBin), FH_, RestRepeat};
+                eof ->
+                    ?INFO("CURRENT EOF, REOPEN!", []),
+                    file:close(FH),
+                    FH_ = Open(Path),
+                    {ok, LineBin} = file:read_line(FH_),
+                    {Chomp(LineBin), FH_}
+            end,
+            receive
+                {val_req, From} -> From ! {val_reply, Line}
+            end,
+            L(L, FH2, NewRepeat)
+    end,
     if Id == 1 ->
             spawn(fun() ->
                         register(file_valgen, self()),
-                        FH = Open(),
-                        Loop(Loop, FH)
+                        {FH, Repeat} = case filelib:is_dir(Path) of
+                            true ->
+                                [First | Rest] = DoRepeat,
+                                {Open(filename:join(Path, First)), Rest};
+                            false ->
+                                {Open(Path), DoRepeat}
+                        end,
+                        Loop(Loop, FH, Repeat)
                 end);
         true ->
             ok
