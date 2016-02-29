@@ -69,6 +69,8 @@ new({file_line_bin, Path}, Id) ->
 new({file_line_bin, Path, DoRepeat}, Id) ->
     Open = fun(File) ->
                Opts = [read, raw, binary, {read_ahead, 16*1024*1024}],
+               R0 = io_lib:format("~p open ~p ~n", [calendar:local_time(), File]),
+               file:write_file("/tmp/basho.record", R0, [append]),
                {ok, FileH} = file:open(File, Opts),
                FileH
            end,
