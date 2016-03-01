@@ -28,7 +28,7 @@
 -record(url, {abspath, host, port, username, password, path, protocol, host_type}).
 
 -record(state, { base_urls,
-                 log_device,
+                 logger,
                  base_urls_index,
                  path_params }).
 
@@ -56,7 +56,7 @@ new(Id) ->
     Path = basho_bench_config:get(meta_path, "/metas"),
     Params = basho_bench_config:get(meta_params, ""),
     Disconnect = basho_bench_config:get(meta_disconnect_frequency, infinity),
-    LogFile = basho_bench_config:get(meta_log_file, "/tmp/access.log"),
+    LogDir = basho_bench_config:get(meta_log_dir, "/tmp/meta-log"),
 
     case Disconnect of
         infinity ->
@@ -78,21 +78,22 @@ new(Id) ->
     BaseUrls = list_to_tuple([#url{host=IP, port=Port, path=Path}
                               || {IP, Port} <- Targets]),
     BaseUrlsIndex = random:uniform(tuple_size(BaseUrls)),
-    {ok, Device} = file:open(LogFile, [write, append]),
 
+    {ok, Logger} = basho_bench_logger:start(LogDir, Id),
     {ok, #state { base_urls = BaseUrls,
-                  log_device = Device,
+                  logger = Logger,
                   base_urls_index = BaseUrlsIndex,
                   path_params = Params }}.
 
-run(get, _KeyGen, ValueGen, #state{log_device=Device}=State) ->
+
+run(get, _KeyGen, ValueGen, #state{logger = Logger}=State) ->
     Json = json_from_value(ValueGen),
     Key0 = proplists:get_value(<<"key">>, Json),
     Key = binary:bin_to_list(Key0),
 
     {NextUrl, S2} = next_url(State),
     Url = url(NextUrl, Key, State#state.path_params),
-    case do_get(Url, Device, [{body_on_success, true}], Json) of
+    case do_get(Url, [{body_on_success, true}], Json, Logger) of
         {ok, _Url, _Headers, _Body} ->
             {ok, S2};
         {ok, _Url, _Headers} ->
@@ -102,22 +103,34 @@ run(get, _KeyGen, ValueGen, #state{log_device=Device}=State) ->
         {error, Reason} ->
             {error, Reason, S2}
     end;
-run(put, KeyGen, ValueGen, #state{log_device=Device}=State) ->
-    {NextUrl, S2} = next_url(State),
-    Url = url(NextUrl, KeyGen, State#state.path_params),
 
-    case do_put(Url, Device, [], ValueGen) of
-        {no_content, _Url} ->   %% FIXME what dose its job?
+run(put, KeyGen, ValueGen, #state{logger = Logger}=State) ->
+    {NextUrl, S2} = next_url(State),
+    Url0 = url(NextUrl, KeyGen, State#state.path_params),
+
+    Val = if is_function(ValueGen) ->
+                ValueGen();
+            true ->
+               ValueGen
+          end,
+    Key0 = proplists:get_value(<<"key">>, jsx:decode(Val), ""),
+    Key = erlang:bitstring_to_list(Key0),
+    Url = Url0#url{ path = lists:concat([Url0#url.path, '/', Key]) },
+
+    case do_put(Url, [], Val, Logger) of
+        {no_content, _Url} ->
             {error, {no_content, Url}, S2};
         ok ->
             {ok, S2};
         {error, Reason} ->
             {error, Reason, S2}
     end;
-run(delete, KeyGen, _ValueGen, #state{log_device=Device}=State) ->
+
+run(delete, KeyGen, _ValueGen, #state{logger=Logger}=State) ->
     {NextUrl, S2} = next_url(State),
     Url = url(NextUrl, KeyGen, State#state.path_params),
-    case do_delete(Url, Device, []) of
+
+    case do_delete(Url, [], Logger) of
         {not_found, _Url} ->
             %% {error, {not_found, Url}, S2};
             {ok, S2};
@@ -126,10 +139,20 @@ run(delete, KeyGen, _ValueGen, #state{log_device=Device}=State) ->
         {error, Reason} ->
             {error, Reason, S2}
     end;
-run(putget, KeyGen, ValueGen, #state{log_device=Device}=State) ->
+
+run(putget, KeyGen, ValueGen, #state{logger=Logger}=State) ->
     {NextUrl, S2} = next_url(State),
-    Url = url(NextUrl, KeyGen, State#state.path_params),
-    case do_putget(Url, Device, [], ValueGen) of
+    Url0 = url(NextUrl, KeyGen, State#state.path_params),
+
+    Val = if is_function(ValueGen) ->
+                ValueGen();
+            true ->
+               ValueGen
+          end,
+    Key = erlang:bitstring_to_list(proplists:get_value(<<"key">>, jsx:decode(Val), "")),
+    Url = Url0#url{ path = lists:concat([Url0#url.path, '/', Key]) },
+
+    case do_putget(Url, [], ValueGen, Logger) of
         ok ->
             {ok, S2};
         {error, Reason} ->
@@ -149,7 +172,6 @@ next_url(State) ->
     { element(State#state.base_urls_index, State#state.base_urls),
       State#state { base_urls_index = State#state.base_urls_index + 1 }}.
 
-
 url(BaseUrl, KeyGen, Params) when is_function(KeyGen) ->
     case KeyGen() of
         Key when is_binary(Key) ->
@@ -157,16 +179,18 @@ url(BaseUrl, KeyGen, Params) when is_function(KeyGen) ->
         Key when is_list(Key) ->
             url(BaseUrl, Key, Params)
     end;
+url(BaseUrl, "", Params) ->
+    BaseUrl#url { path = lists:concat([BaseUrl#url.path, Params]) };
 url(BaseUrl, Key, Params) ->
     BaseUrl#url { path = lists:concat([BaseUrl#url.path, '/', Key, Params]) }.
 
-do_get(Url, IoDevice, Opts) ->
-    do_get(Url, IoDevice, [{body_on_success, false} | Opts], []).
+do_get(Url, Logger, Opts) ->
+    do_get(Url, Logger, [{body_on_success, false} | Opts], []).
 
-do_get(Url, IoDevice, Opts, Json) ->
+do_get(Url, Opts, Json, Logger) ->
     case send_request(Url, [], get, [], [{response_format, binary}]) of
         {ok, Code, Header, Body} ->
-            file:write(IoDevice, io_lib:format("> GET ~p '~p' ~n", [Url#url.path, Code])),
+            basho_bench_logger:log(Logger, {get, Url#url.path, Code}),
             case Code of
                 "404" ->
                     {error, {notfound, Url}};
@@ -186,21 +210,15 @@ do_get(Url, IoDevice, Opts, Json) ->
                     {error, {http_error, Code}}
             end;
         {error, Reason} ->
-            file:write(IoDevice, io_lib:format("> GET ~p ERROR: '~p' ~n", [Url#url.path, Reason])),
+            basho_bench_logger:log(Logger, {get_error, Url#url.path, Reason}),
             {error, Reason}
     end.
 
-do_put(Url, IoDevice, Headers, ValueGen) ->
-    Val = if is_function(ValueGen) ->
-                ValueGen();
-            true ->
-               ValueGen
-          end,
+do_put(Url, Headers, Val, Logger) ->
     case send_request(Url, Headers ++ [{'Content-Type', 'application/json'}],
                       post, Val, [{response_format, binary}]) of
         {ok, Code, _Header, _Body} ->
-            Log = io_lib:format("> PUT ~p '~p' ~n", [proplists:get_value(<<"key">>, jsx:decode(Val), ""), Code]),
-            file:write(IoDevice, Log),
+            basho_bench_logger:log(Logger, {put, Url#url.path, Code}),
             case Code of
                 "200" -> ok;
                 "201" -> ok;
@@ -208,35 +226,25 @@ do_put(Url, IoDevice, Headers, ValueGen) ->
                 Code -> {error, {http_error, Code}}
             end;
         {error, Reason} ->
-            Log = io_lib:format("> PUT ~p Body length is ~p ERROR: '~p' ~n",
-                                [Url#url.path, byte_size(ValueGen()), Reason]),
-            file:write(IoDevice, Log),
+            basho_bench_logger:log(Logger, {put_error, Url#url.path, Reason}),
             {error, Reason}
     end.
 
-do_putget(Url, IoDevice, Headers, ValueGen) ->
-    Val = if is_function(ValueGen) ->
-                ValueGen();
-            true ->
-               ValueGen
-          end,
+do_putget(Url, Headers, Val, Logger) ->
     case send_request(Url, Headers ++ [{'Content-Type', 'application/octet-stream'}],
                      put, Val, [{response_format, binary}]) of
         {ok, Code, _Header, _Body} ->
-            Log = io_lib:format("> PUT ~p Body length is ~p '~p' ~n",
-                                [Url#url.path, byte_size(ValueGen()), Code]),
-            file:write(IoDevice, Log),
-
+            basho_bench_logger:log(Logger, {put, Url#url.path, Code}),
             if Code =:= "201" orelse Code =:= "204" ->
-                    case do_get(Url, IoDevice, [{body_on_success, true}]) of
+                    case do_get(Url, Logger, [{body_on_success, true}]) of
                         {ok, Url, _Header2, Body} ->
                             if Body =:= Val ->
                                     Log0 = io_lib:format("> GOT ~p Body the same as puted!~n", [Url#url.path]),
-                                    file:write(IoDevice, Log0),
+                                    basho_bench_logger:log(Logger, Log0),
                                     ok;
                                 true ->
                                     Log0 = io_lib:format("> GOT ~p Body NOT THE Same as puted!~n", [Url#url.path]),
-                                    file:write(IoDevice, Log0),
+                                    basho_bench_logger:log(Logger, Log0),
                                     {error, get_body_error}
                             end;
                         Error ->
@@ -246,26 +254,21 @@ do_putget(Url, IoDevice, Headers, ValueGen) ->
                     {error, {http_error, Code}}
             end;
         {error, Reason} ->
-            Log = io_lib:format("> PUT ~p Body length is ~p ERROR: '~p' ~n",
-                                [Url#url.path, byte_size(ValueGen()), Reason]),
-            file:write(IoDevice, Log),
+            basho_bench_logger:log(Logger, {put_error, Url#url.path, Reason}),
             {error, Reason}
     end.
 
-do_delete(Url, IoDevice, Headers) ->
+do_delete(Url, Headers, Logger) ->
     case send_request(Url, Headers, delete, [], []) of
         {ok, Code, _Header, _Body} ->
-            Log = io_lib:format("> DELETE ~p '~p' ~n", [Url#url.path, Code]),
-            file:write(IoDevice, Log),
-
+            basho_bench_logger:log(Logger, {delete, Url#url.path, Code}),
             case Code of
                 "204" -> ok;
                 "404" -> {not_found, Url};
                 Code -> {error, {http_error, Code}}
             end;
         {error, Reason} ->
-            Log = io_lib:format("> DELETE ~p Error: ~p ~n", [Url#url.path, Reason]),
-            file:write(IoDevice, Log),
+            basho_bench_logger:log(Logger, {delete_error, Url#url.path, Reason}),
             {error, Reason}
     end.
 
@@ -323,13 +326,13 @@ should_disconnect_secs(Seconds, Url) ->
     Key = {last_disconnect, Url#url.host},
     case erlang:get(Key) of
         undefined ->
-            erlang:put(Key, erlang:now()),
+            erlang:put(Key, erlang:timestamp()),
             false;
         Time when is_tuple(Time) andalso size(Time) == 3 ->
-            Diff = time:now_diff(erlang:now(), Time),
+            Diff = time:now_diff(erlang:timestamp(), Time),
             if
                 Diff >= Seconds * 1000000 ->
-                    erlang:put(Key, erlang:now()),
+                    erlang:put(Key, erlang:timestamp()),
                     true;
                 true -> false
             end
@@ -342,7 +345,7 @@ clear_disconnect_freq(Url) ->
         {ops, _Count} ->
             erlang:put({ops_since_disconnect, Url#url.host}, 0);
         _Seconds ->
-            erlang:put({last_disconnect, Url#url.host}, erlang:now())
+            erlang:put({last_disconnect, Url#url.host}, erlang:timestamp())
     end.
 
 

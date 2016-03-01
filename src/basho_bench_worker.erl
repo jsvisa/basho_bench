@@ -53,10 +53,10 @@
 %% ====================================================================
 
 start_link(SupChild, Id) ->
-    case basho_bench_config:get(distribute_work, false) of 
-        true -> 
+    case basho_bench_config:get(distribute_work, false) of
+        true ->
             start_link_distributed(SupChild, Id);
-        false -> 
+        false ->
             start_link_local(SupChild, Id)
     end.
 
@@ -92,7 +92,7 @@ init([SupChild, Id]) ->
     {A1, A2, A3} =
         case basho_bench_config:get(rng_seed, {42, 23, 12}) of
             {Aa, Ab, Ac} -> {Aa, Ab, Ac};
-            now -> now()
+            now -> elang:timestamp()
         end,
 
     RngSeed = {A1+Id, A2+Id, A3+Id},
