@@ -350,7 +350,7 @@ clear_disconnect_freq(Url) ->
 
 
 send_request(Url, Headers, Method, Body, Options) ->
-    send_request(Url, Headers, Method, Body, Options, 3).
+    send_request(Url, Headers, Method, Body, Options, 1).
 
 send_request(_Url, _Headers, _Method, _Body, _Options, 0) ->
     {error, max_retries};

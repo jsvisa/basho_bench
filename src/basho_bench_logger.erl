@@ -158,5 +158,7 @@ logging(Msg, Device) when is_list(Msg) orelse is_binary(Msg) ->
 logging({get, Path, Code}, Device) ->
     logging(io_lib:format("> GET ~p '~p' ~n", [Path, Code]), Device);
 logging({put, Path, Code}, Device) ->
-    logging(io_lib:format("> PUT ~p '~p' ~n", [Path, Code]), Device).
+    logging(io_lib:format("> PUT ~p '~p' ~n", [Path, Code]), Device);
+logging(Msg, _Dev) ->
+    lager:error("Logging not support: ~p~n", [Msg]).
 
