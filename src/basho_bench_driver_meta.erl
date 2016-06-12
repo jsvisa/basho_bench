@@ -86,14 +86,19 @@ new(Id) ->
                   path_params = Params }}.
 
 
-run(get, _KeyGen, ValueGen, #state{logger = Logger}=State) ->
-    Json = json_from_value(ValueGen),
-    Key0 = proplists:get_value(<<"key">>, Json),
-    Key = binary:bin_to_list(Key0),
+run(get, KeyGen, ValueGen, #state{logger = Logger}=State) ->
+    {Key, BodyOnSuccess, Json} =
+    if KeyGen =/= null ->
+        {KeyGen(), false, []};
+    true ->
+        Json0 = json_from_value(ValueGen),
+        Key0 = proplists:get_value(<<"key">>, Json0),
+        {binary:bin_to_list(Key0), true, Json0}
+    end,
 
     {NextUrl, S2} = next_url(State),
     Url = url(NextUrl, Key, State#state.path_params),
-    case do_get(Url, [{body_on_success, true}], Json, Logger) of
+    case do_get(Url, [{body_on_success, BodyOnSuccess}], Json, Logger) of
         {ok, _Url, _Headers, _Body} ->
             {ok, S2};
         {ok, _Url, _Headers} ->
@@ -106,16 +111,28 @@ run(get, _KeyGen, ValueGen, #state{logger = Logger}=State) ->
 
 run(put, KeyGen, ValueGen, #state{logger = Logger}=State) ->
     {NextUrl, S2} = next_url(State),
-    Url0 = url(NextUrl, KeyGen, State#state.path_params),
+    Key = if is_function(KeyGen) ->
+                KeyGen();
+            true ->
+                KeyGen
+          end,
 
     Val = if is_function(ValueGen) ->
                 ValueGen();
+            is_list(ValueGen) ->
+                Val0 = case jsx:is_term(ValueGen) of
+                            true -> [{'key', erlang:list_to_binary(Key)} | ValueGen];
+                            Else -> Else
+                       end,
+                jsx:encode(Val0);
             true ->
                ValueGen
           end,
-    Key0 = proplists:get_value(<<"key">>, jsx:decode(Val), ""),
-    Key = erlang:bitstring_to_list(Key0),
-    Url = Url0#url{ path = lists:concat([Url0#url.path, '/', Key]) },
+    Url = url(NextUrl, Key, State#state.path_params),
+
+    %% Key0 = proplists:get_value(<<"key">>, jsx:decode(Val), ""),
+    %% Key = erlang:bitstring_to_list(Key0),
+    %% Url = Url0#url{ path = lists:concat([Url0#url.path, '/', Key]) },
 
     case do_put(Url, [], Val, Logger) of
         {no_content, _Url} ->
