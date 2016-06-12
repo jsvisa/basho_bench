@@ -131,6 +131,10 @@ new({file_line_bin, Path, DoRepeat}, Id) ->
                     Bin
             end
     end;
+new(Bin, _Id) when is_binary(Bin) ->
+    fun() -> Bin end;
+new(List, _Id) when is_list(List) ->
+    List;
 new(Other, _Id) ->
     ?FAIL_MSG("Invalid value generator requested: ~p\n", [Other]).
 
