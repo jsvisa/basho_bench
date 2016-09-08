@@ -165,7 +165,7 @@ new({file_line_bin, Path, DoRepeat}, Id) ->
            end,
     if Id == 1 ->
             spawn(fun() ->
-                          register(file_keygen, self()),
+                          true = register(file_keygen, self()),
                           FH = Open(),
                           Loop(Loop, FH)
                   end);

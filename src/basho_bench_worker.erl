@@ -262,7 +262,16 @@ worker_next_op(State) ->
             basho_bench_stats:op_complete(Next, Res, ElapsedUs),
             {ok, State#state { driver_state = DriverState}};
 
+        {Res, {log, Log}, DriverState} when Res == ok orelse element(1, Res) == ok ->
+            basho_bench_stats:op_complete(Next, Res, ElapsedUs),
+            basho_bench_logger:log(info, Log),
+            {ok, State#state { driver_state = DriverState}};
+
         {Res, DriverState} when Res == silent orelse element(1, Res) == silent ->
+            {ok, State#state { driver_state = DriverState}};
+
+        {Res, {log, Log}, DriverState} when Res == silent orelse element(1, Res) == silent ->
+            basho_bench_logger:log(info, Log),
             {ok, State#state { driver_state = DriverState}};
 
         {ok, ElapsedT, DriverState} ->
@@ -270,9 +279,24 @@ worker_next_op(State) ->
             basho_bench_stats:op_complete(Next, ok, ElapsedT),
             {ok, State#state { driver_state = DriverState}};
 
+        {ok, ElapsedT, {log, Log}, DriverState} ->
+            %% time is measured by external system
+            basho_bench_stats:op_complete(Next, ok, ElapsedT),
+            basho_bench_logger:log(info, Log),
+            {ok, State#state { driver_state = DriverState}};
+
         {error, Reason, DriverState} ->
             %% Driver encountered a recoverable error
             basho_bench_stats:op_complete(Next, {error, Reason}, ElapsedUs),
+            State#state.shutdown_on_error andalso
+                erlang:send_after(500, basho_bench,
+                                  {shutdown, "Shutdown on errors requested", 1}),
+            {ok, State#state { driver_state = DriverState}};
+
+        {error, Reason, {log, Log},  DriverState} ->
+            %% Driver encountered a recoverable error
+            basho_bench_stats:op_complete(Next, {error, Reason}, ElapsedUs),
+            basho_bench_logger:log(error, Log),
             State#state.shutdown_on_error andalso
                 erlang:send_after(500, basho_bench,
                                   {shutdown, "Shutdown on errors requested", 1}),
