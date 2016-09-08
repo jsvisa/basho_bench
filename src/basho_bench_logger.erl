@@ -11,7 +11,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start/2, start_link/2, log/2]).
+-export([start_link/0, log/2]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -21,7 +21,7 @@
          terminate/2,
          code_change/3]).
 
--record(state, {device}).
+-record(state, {info_device, error_device}).
 
 %%%===================================================================
 %%% API
@@ -31,24 +31,15 @@
 %% @doc
 %% Starts the server
 %%
-%% @spec start() -> {ok, Pid} | ignore | {error, Error}
-%% @end
-%%--------------------------------------------------------------------
-start(LogDir, Id) ->
-    gen_server:start(?MODULE, [LogDir, Id], []).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts the server
-%%
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link(LogDir, Id) ->
-    gen_server:start_link(?MODULE, [LogDir, Id], []).
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-log(Pid, Msg) ->
-    gen_server:cast(Pid, {log, Msg}).
+-spec log(info | error, list()) -> ok.
+log(Type, Msg) ->
+    gen_server:cast(?MODULE, {log, Type, Msg}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -65,16 +56,14 @@ log(Pid, Msg) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([LogDir, Id]) ->
-    case LogDir of
-        none ->
-            {ok, #state{device = undefined}};
-        LogDir ->
-            LogFile = lists:concat([LogDir, '/', Id]),
-            ok = filelib:ensure_dir(LogFile),
-            {ok, Device} = file:open(LogFile, [write, append]),
-            {ok, #state{device = Device}}
-    end.
+init([]) ->
+
+    LogDir = basho_bench_config:get(logger_dir, "/disk/ssd1/logs/basho_bench"),
+    ok = filelib:ensure_dir(filename:join(LogDir, "dummy")),
+    {ok, InfoDevice} = file:open(filename:join(LogDir, "info.log"), [write, append]),
+    {ok, ErrorDevice} = file:open(filename:join(LogDir, "error.log"), [write, append]),
+    {ok, #state{info_device = InfoDevice,
+                error_device = ErrorDevice}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -104,10 +93,8 @@ handle_call(_Request, _From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast({log, _Msg}, #state{device = undefined} = State) ->
-    {noreply, State};
-handle_cast({log, Msg}, #state{device = Device} = State) ->
-    logging(Msg, Device),
+handle_cast({log, Type, Msg}, #state{} = State) ->
+    logging(Type, Msg, State),
     {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -153,12 +140,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-logging(Msg, Device) when is_list(Msg) orelse is_binary(Msg) ->
+logging(info, Msg, #state{info_device = Device}) ->
     ok = file:write(Device, Msg);
-logging({get, Path, Code}, Device) ->
-    logging(io_lib:format("> GET ~p '~p' ~n", [Path, Code]), Device);
-logging({put, Path, Code}, Device) ->
-    logging(io_lib:format("> PUT ~p '~p' ~n", [Path, Code]), Device);
-logging(Msg, _Dev) ->
-    lager:error("Logging not support: ~p~n", [Msg]).
-
+logging(error, Msg, #state{error_device = Device}) ->
+    ok = file:write(Device, Msg);
+logging(_, _Msg, #state{}) ->
+    ok.
