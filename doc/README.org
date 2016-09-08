@@ -21,7 +21,7 @@
 
 ** Quick Start
 
-   You must have [[http://erlang.org/download.html][Erlang/OTP R13B03]] or later to build and run Basho
+   You must have [[http://erlang.org/download.html][Erlang/OTP R16]] or later to build and run Basho
    Bench, and [[http://www.r-project.org/][R]] to generate graphs of your benchmarks.  A sane
    GNU-style build system is also required if you want to use =make=
    to build the project.
@@ -83,7 +83,7 @@ make results
    your benchmark. It is also straightforward -- with less than 200
    lines of Erlang code -- to create custom drivers that can exercise
    other systems or perform custom operations. These are covered more
-   in detail in the [[http://docs.basho.com/riak/latest/cookbooks/Benchmarking/][documentation]].
+   in detail in the [[http://docs.basho.com/riak/latest/ops/building/benchmarking/][documentation]].
 
 ** Benchmarking with riak-java-client
    The [[https://github.com/basho/riak-java-client][riak-java-client]] can be used to benchmark a Riak cluster. There
