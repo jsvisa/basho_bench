@@ -70,7 +70,7 @@ init([]) ->
         end,
 
     {ok, {{one_for_one, 5, 10},
-        [?CHILD(basho_bench_stats, worker)] ++
+        [?CHILD(basho_bench_stats, worker), ?CHILD(basho_bench_logger, worker)] ++
         Workers ++
         MeasurementDriver
     }}.
