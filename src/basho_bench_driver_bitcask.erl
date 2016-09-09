@@ -58,6 +58,11 @@ new(_Id) ->
             SyncInterval = infinity
     end,
 
+    KeyDirMode = basho_bench_config:get(bitcask_keydir_mode, nif),
+    KeyDirPath = basho_bench_config:get(bitcask_keydir_path, "/tmp"),
+    application:set_env(bitcask, keydir_mode, KeyDirMode),
+    application:set_env(bitcask, keydir_path, KeyDirPath),
+
     %% Get any bitcask flags
     Flags = basho_bench_config:get(bitcask_flags, []),
     case bitcask:open(Filename, [read_write] ++ Flags) of
