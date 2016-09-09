@@ -22,7 +22,7 @@ elena: all
 	./basho_bench examples/elena.config
 
 rel: deps compile
-	cd rel && .$(REBAR) generate skip_deps=true $(OVERLAY_VARS)
+	cd rel && $(REBAR) generate skip_deps=true $(OVERLAY_VARS)
 
 deps:
 	$(REBAR) get-deps
