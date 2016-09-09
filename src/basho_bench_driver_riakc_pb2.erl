@@ -142,7 +142,7 @@ run(put, _KeyGen, ValueGen, State) ->
         {error, disconnected} ->
             run(put, _KeyGen, ValueGen, State);  % suboptimal, but ...
         {error, Reason} ->
-            {error, Reason, {log, [Reason, Key]}, State}
+            {error, Reason, {log, io_lib:format("~p ~s~n", [Reason, basho_uuid:to_string(Key)])}, State}
     end;
 run(update, KeyGen, ValueGen, State) ->
     Key = KeyGen(),
