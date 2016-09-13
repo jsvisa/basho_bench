@@ -128,7 +128,8 @@ run(get_existing, KeyGen, _ValueGen, State) ->
         {error, disconnected} ->
             run(get_existing, KeyGen, _ValueGen, State);
         {error, Reason} ->
-            {error, Reason, {log, [Reason, Key]}, State}
+            Log = io_lib:format("error: ~p ~s~n", [Reason, Key]),
+            {error, Reason, {log, Log}, State}
     end;
 run(put, _KeyGen, ValueGen, State) ->
     Key = basho_uuid:v4(),
@@ -202,19 +203,24 @@ run(update_existing, KeyGen, ValueGen, State) ->
             {error, Reason, State}
     end;
 run(delete, KeyGen, _ValueGen, State) ->
+    Key0 = KeyGen(),
+    Key1 = binary_to_list(Key0),
+    [Key, _Md5] = string:tokens(Key1, " "),
+    RequestKey = basho_uuid:to_binary(Key),
+
     %% Pass on rw
-    case riakc_pb_socket:delete(State#state.pid, State#state.bucket, KeyGen(),
+    case riakc_pb_socket:delete(State#state.pid, State#state.bucket, RequestKey,
                                 [{rw, State#state.rw}], State#state.timeout_write) of
         ok ->
             {ok, State};
         {error, notfound} ->
-            {ok, State};
+            Log = io_lib:format("notfound ~s~n", [Key]),
+            {error, {not_found, Key}, {log, Log}, State};
         {error, disconnected} ->
             run(delete, KeyGen, _ValueGen, State);
         {error, Reason} ->
             {error, Reason, State}
     end.
-
 
 %% ====================================================================
 %% Internal functions
