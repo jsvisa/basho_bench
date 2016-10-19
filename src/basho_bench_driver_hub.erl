@@ -54,7 +54,7 @@ new(Id) ->
     application:start(ibrowse),
 
     Ips = basho_bench_config:get(hub_ips, ["127.0.0.1"]),
-    DefaultPort = basho_bench_config:get(hub_port, 8098),
+    DefaultPort = basho_bench_config:get(hub_port, 7071),
     Path = basho_bench_config:get(hub_path, "/hub"),
     Params = basho_bench_config:get(hub_params, ""),
     Disconnect = basho_bench_config:get(hub_disconnect_frequency, infinity),
@@ -179,12 +179,21 @@ next_url(State) ->
       State#state { base_urls_index = State#state.base_urls_index + 1 }}.
 
 url(BaseUrl, KeyGen, Params) when is_function(KeyGen) ->
-    BaseUrl#url { path = lists:concat([BaseUrl#url.path, '/', KeyGen(), Params]) };
-url(BaseUrl, Key, Params) ->
+    case KeyGen() of
+        Key when is_binary(Key) ->
+            url(BaseUrl, binary_to_list(Key), Params);
+        Key when is_list(Key) ->
+            url(BaseUrl, Key, Params)
+    end;
+url(BaseUrl, Key, Params) when is_list(Key) ->
     BaseUrl#url { path = lists:concat([BaseUrl#url.path, '/', Key, Params]) }.
 
-url(BaseUrl0, Key, Params, Iter) when is_binary(Iter)->
-    url(BaseUrl0, Key, Params, erlang:binary_to_list(Iter));
+url(BaseUrl0, Key, Params, "") ->
+    url(BaseUrl0, Key, Params, '');
+url(BaseUrl0, Key, Params, "g2gCZAAEbmV4dGQAA2VvZg") ->
+    url(BaseUrl0, Key, Params, '');
+url(BaseUrl0, Key, Params, Iter) when is_binary(Iter) ->
+    url(BaseUrl0, Key, Params, binary_to_list(Iter));
 url(BaseUrl0, Key, Params, Iter) ->
     BaseUrl = url(BaseUrl0, Key, Params),
     BaseUrl#url { path = lists:concat([BaseUrl#url.path, '?ls=true&iter=', Iter]) }.
@@ -220,8 +229,9 @@ do_getlist(Url, Opts) ->
         {ok, "200", Header, Body} ->
             case catch mochijson2:decode(Body) of
                 {struct, Fields} ->
-                    %% ?DEBUG("Fields is ~p~n", [Fields]),
+                    %% ?DEBUG("Fields are ~p~n", [Fields]),
                     Iter = proplists:get_value(<<"iter">>, Fields),
+                    %% ?DEBUG("Iterator is ~p~n", [Iter]),
                     case proplists:get_bool(body_on_success, Opts) of
                         true  -> {ok, Url, Header, Body, Iter};
                         false -> {ok, Url, Header, Iter}
