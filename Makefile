@@ -10,10 +10,13 @@ REBAR           ?= $(BASE_DIR)/rebar
 OVERLAY_VARS    ?=
 
 
-all: deps compile
-	$(REBAR) skip_deps=true escriptize
+all: deps compile escriptize
 
 .PHONY: deps compile rel lock locked-all locked-deps
+
+escriptize:
+	$(REBAR) skip_deps=true compile
+	$(REBAR) skip_deps=true escriptize
 
 reverse: all
 	./basho_bench examples/reverse.putget.config
