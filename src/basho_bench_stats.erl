@@ -61,7 +61,7 @@ op_complete(Op, ok, ElapsedUs) ->
     op_complete(Op, {ok, 1}, ElapsedUs);
 op_complete(Op, {ok, Units}, ElapsedUs) ->
     %% Update the histogram and units counter for the op in question
-   % io:format("Get distributed: ~p~n", [get_distributed()]),
+    % io:format("Get distributed: ~p~n", [get_distributed()]),
     case get_distributed() of
         true ->
             gen_server:cast({global, ?MODULE}, {Op, {ok, Units}, ElapsedUs});
@@ -146,15 +146,16 @@ handle_cast({Op, {ok, Units}, ElapsedUs}, State = #state{last_write_time = LWT, 
     Now = os:timestamp(),
     TimeSinceLastReport = timer:now_diff(Now, LWT) / 1000, %% To get the diff in seconds
     TimeSinceLastWarn = timer:now_diff(Now, State#state.last_warn) / 1000,
-    if
-        TimeSinceLastReport > (RI * 2) andalso TimeSinceLastWarn > ?WARN_INTERVAL  ->
-            ?WARN("basho_bench_stats has not reported in ~.2f milliseconds\n", [TimeSinceLastReport]),
-            {message_queue_len, QLen} = process_info(self(), message_queue_len),
-            ?WARN("stats process mailbox size = ~w\n", [QLen]),
-            NewState = State#state{last_warn = Now};
-        true ->
-            NewState = State
-    end,
+    NewState =
+        if
+            TimeSinceLastReport > (RI * 2) andalso TimeSinceLastWarn > ?WARN_INTERVAL  ->
+                ?WARN("basho_bench_stats has not reported in ~.2f milliseconds\n", [TimeSinceLastReport]),
+                {message_queue_len, QLen} = process_info(self(), message_queue_len),
+                ?WARN("stats process mailbox size = ~w\n", [QLen]),
+                State#state{last_warn = Now};
+            true ->
+                State
+        end,
     folsom_metrics:notify({latencies, Op}, ElapsedUs),
     folsom_metrics:notify({units, Op}, {inc, Units}),
     {noreply, NewState};
@@ -246,8 +247,7 @@ process_stats(Now, #state{stats_writer=Module}=State) ->
     {Oks, Errors, OkOpsRes} =
         lists:foldl(fun(Op, {TotalOks, TotalErrors, OpsResAcc}) ->
                             {Oks, Errors} = report_latency(State, Elapsed, Window, Op),
-                            {TotalOks + Oks, TotalErrors + Errors,
-                             [{Op, Oks}|OpsResAcc]}
+                            {TotalOks + Oks, TotalErrors + Errors, [{Op, Oks}|OpsResAcc]}
                     end, {0,0,[]}, State#state.ops),
 
     %% Reset units
@@ -263,8 +263,7 @@ process_stats(Now, #state{stats_writer=Module}=State) ->
             ErrCounts = ets:tab2list(basho_bench_errors),
             true = ets:delete_all_objects(basho_bench_errors),
             ?INFO("Errors:~p\n", [lists:sort(ErrCounts)]),
-            [ets_increment(basho_bench_total_errors, Err, Count) ||
-                              {Err, Count} <- ErrCounts],
+            [ets_increment(basho_bench_total_errors, Err, Count) || {Err, Count} <- ErrCounts],
             ok;
         false ->
             ok
@@ -279,10 +278,8 @@ report_latency(#state{stats_writer=Module}=State, Elapsed, Window, Op) ->
     Errors = error_counter(Op),
     Units = folsom_metrics:get_metric_value({units, Op}),
 
-    Module:report_latency({State#state.stats_writer,
-                                             State#state.stats_writer_data},
-                                            Elapsed, Window, Op,
-                                            Stats, Errors, Units),
+    Module:report_latency({State#state.stats_writer, State#state.stats_writer_data},
+                          Elapsed, Window, Op, Stats, Errors, Units),
     {Units, Errors}.
 
 report_total_errors(#state{stats_writer=Module}=State) ->
@@ -298,9 +295,8 @@ report_total_errors(#state{stats_writer=Module}=State) ->
                                 ok; % per op total
                             false ->
                                 ?INFO("  ~p: ~p\n", [Key, Count]),
-                                Module:report_error({State#state.stats_writer,
-                                                                       State#state.stats_writer_data},
-                                                                      Key, Count)
+                                Module:report_error({State#state.stats_writer, State#state.stats_writer_data},
+                                                    Key, Count)
                         end
                 end,
             lists:foreach(F, ErrCounts)

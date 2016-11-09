@@ -121,28 +121,29 @@ report_error({{riemann}, _},
 report_latency({{csv}, {_SummaryFile, _ErrorsFile}},
                Elapsed, Window, Op,
                Stats, Errors, Units) ->
-    case proplists:get_value(n, Stats) > 0 of
-        true ->
-            P = proplists:get_value(percentile, Stats),
-            Line = io_lib:format("~w, ~w, ~w, ~w, ~.1f, ~w, ~w, ~w, ~w, ~w, ~w\n",
-                                 [Elapsed,
-                                  Window,
-                                  Units,
-                                  proplists:get_value(min, Stats),
-                                  proplists:get_value(arithmetic_mean, Stats),
-                                  proplists:get_value(median, Stats),
-                                  proplists:get_value(95, P),
-                                  proplists:get_value(99, P),
-                                  proplists:get_value(999, P),
-                                  proplists:get_value(max, Stats),
-                                  Errors]);
-        false ->
-            ?WARN("No data for op: ~p\n", [Op]),
-            Line = io_lib:format("~w, ~w, 0, 0, 0, 0, 0, 0, 0, 0, ~w\n",
-                                 [Elapsed,
-                                  Window,
-                                  Errors])
-    end,
+    Line =
+        case proplists:get_value(n, Stats) > 0 of
+            true ->
+                P = proplists:get_value(percentile, Stats),
+                io_lib:format("~w, ~w, ~w, ~w, ~.1f, ~w, ~w, ~w, ~w, ~w, ~w\n",
+                              [Elapsed,
+                               Window,
+                               Units,
+                               proplists:get_value(min, Stats),
+                               proplists:get_value(arithmetic_mean, Stats),
+                               proplists:get_value(median, Stats),
+                               proplists:get_value(95, P),
+                               proplists:get_value(99, P),
+                               proplists:get_value(999, P),
+                               proplists:get_value(max, Stats),
+                               Errors]);
+            false ->
+                ?WARN("No data for op: ~p\n", [Op]),
+                io_lib:format("~w, ~w, 0, 0, 0, 0, 0, 0, 0, 0, ~w\n",
+                              [Elapsed,
+                               Window,
+                               Errors])
+        end,
     file:write(erlang:get({csv_file, Op}), Line);
 report_latency({{riemann}, _},
                _Elapsed, _Window, Op,

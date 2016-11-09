@@ -410,12 +410,13 @@ run(search_interval, _KeyGen, _ValueGen, #state{search_queries=SearchQs, start_t
     [{Index, Query, Options}|_] = SearchQs,
 
     Now = erlang:now(),
-    case timer:now_diff(Now, StartTime) of
-        _MicroSec when _MicroSec > (Interval * 1000000) ->
-            NewState = State#state{search_queries=roll_list(SearchQs),start_time=Now};
-        _MicroSec -> 
-            NewState = State
-    end,
+    NewState =
+        case timer:now_diff(Now, StartTime) of
+            _MicroSec when _MicroSec > (Interval * 1000000) ->
+                State#state{search_queries=roll_list(SearchQs),start_time=Now};
+            _MicroSec ->
+                State
+        end,
 
     case riakc_pb_socket:search(NewState#state.pid, Index, Query, Options, NewState#state.timeout_read) of
           {ok, _Results} ->

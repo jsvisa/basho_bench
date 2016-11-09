@@ -127,8 +127,8 @@ run({query_http, MaxN}, KeyGen, _ValueGen, State) ->
     Port = State#state.http_port,
     Bucket = State#state.bucket,
     {StartKey, EndKey, MaxKey, N} = expected_n(to_integer(KeyGen()), State#state.max_key, MaxN),
-    URL = io_lib:format("http://~s:~p/buckets/~s/index/field1_int/~p/~p", 
-                    [Host, Port, Bucket, StartKey, EndKey]),
+    URL = io_lib:format("http://~s:~p/buckets/~s/index/field1_int/~p/~p",
+                        [Host, Port, Bucket, StartKey, EndKey]),
 
     case json_get(URL, State) of
         {ok, {struct, Proplist}} ->
@@ -140,9 +140,9 @@ run({query_http, MaxN}, KeyGen, _ValueGen, State) ->
                     {ok, State};
                 {Results, _} ->
                     %% MaxKey was set, so we're assuming sequential_int from 0-MaxKey, so all values should be there.
-                    {error, 
+                    {error,
                      binary_to_list(iolist_to_binary(
-                        io_lib:format("Not enough results for query_http: ~p/~p/~p~n", [StartKey, EndKey, Results]))), 
+                        io_lib:format("Not enough results for query_http: ~p/~p/~p~n", [StartKey, EndKey, Results]))),
                      State}
             end;
         {error, Reason} ->
@@ -219,7 +219,7 @@ run({query_mr, MaxN}, KeyGen, _ValueGen, State) ->
             io:format("Not enough results for query_mr: ~p/~p/~p~n", [StartKey, EndKey, Results]),
             {ok, State};
         {{ok, Results}, _} ->
-            {error, 
+            {error,
              binary_to_list(iolist_to_binary(
                 io_lib:format("Not enough results for query_mr: ~p/~p/~p~n", [StartKey, EndKey, Results]))),
              State};
@@ -308,7 +308,7 @@ run({query_pb, MaxN}, KeyGen, _ValueGen, State) ->
     Bucket = State#state.bucket,
     {StartKey, EndKey, MaxKey, N} = expected_n(to_integer(KeyGen()), State#state.max_key, MaxN),
     case {riakc_pb_socket:get_index(Pid, Bucket, <<"field1_int">>,
-				    to_binary(StartKey), to_binary(EndKey),
+                                    to_binary(StartKey), to_binary(EndKey),
                                     State#state.pb_timeout, State#state.pb_timeout), MaxKey} of
         {{ok, Results}, _} when length(Results) == N ->
             {ok, State};

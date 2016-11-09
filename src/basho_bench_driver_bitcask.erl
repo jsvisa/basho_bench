@@ -51,12 +51,11 @@ new(_Id) ->
     Filename = filename:join(Dir, "test.bitcask"),
 
     %% Look for sync interval config
-    case basho_bench_config:get(bitcask_sync_interval, infinity) of
-        Value when is_integer(Value) ->
-            SyncInterval = Value;
-        infinity ->
-            SyncInterval = infinity
-    end,
+    SyncInterval =
+        case basho_bench_config:get(bitcask_sync_interval, infinity) of
+            Value when is_integer(Value) -> Value;
+            infinity -> infinity
+        end,
 
     KeyDirMode = basho_bench_config:get(bitcask_keydir_mode, nif),
     KeyDirPath = basho_bench_config:get(bitcask_keydir_path, "/tmp"),

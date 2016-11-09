@@ -1,6 +1,6 @@
 %% -------------------------------------------------------------------
 %%
-%% basho_bench: benchmark service on any within Erlang cluster 
+%% basho_bench: benchmark service on any within Erlang cluster
 %%              using distribution protocol
 %%
 %% Copyright (c) 2015 Dmitry Kolesnikov
