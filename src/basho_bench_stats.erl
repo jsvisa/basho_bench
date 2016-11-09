@@ -278,7 +278,7 @@ report_latency(#state{stats_writer=Module}=State, Elapsed, Window, Op) ->
     Errors = error_counter(Op),
     Units = folsom_metrics:get_metric_value({units, Op}),
 
-    Module:report_latency({State#state.stats_writer, State#state.stats_writer_data},
+    Module:report_latency(State#state.stats_writer_data,
                           Elapsed, Window, Op, Stats, Errors, Units),
     {Units, Errors}.
 
@@ -295,8 +295,7 @@ report_total_errors(#state{stats_writer=Module}=State) ->
                                 ok; % per op total
                             false ->
                                 ?INFO("  ~p: ~p\n", [Key, Count]),
-                                Module:report_error({State#state.stats_writer, State#state.stats_writer_data},
-                                                    Key, Count)
+                                Module:report_error(State#state.stats_writer_data, Key, Count)
                         end
                 end,
             lists:foreach(F, ErrCounts)
