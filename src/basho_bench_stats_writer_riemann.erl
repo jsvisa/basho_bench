@@ -47,6 +47,7 @@
 %%    ].
 
 -module(basho_bench_stats_writer_riemann).
+-behaviour(basho_bench_stats_writer).
 
 -export([new/2,
          terminate/1,
