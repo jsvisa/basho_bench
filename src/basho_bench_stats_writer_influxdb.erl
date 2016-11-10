@@ -58,23 +58,26 @@
 new(_, _) ->
     ?INFO("module=~s event=start stats_sink=influxdb\n", [?MODULE]),
     {ok, InfluxDB} = basho_bench_influxdb:new(),
-    InfluxDB.
+    Driver0 = basho_bench_config:get(driver),
+    Driver = driver_name(Driver0),
+
+    {InfluxDB, Driver}.
 
 terminate(_) ->
     ?INFO("module=~s event=stop stats_sink=influxdb\n", [?MODULE]),
     ok.
 
-process_summary(_InflxDB, _Elapsed, _Window, _Oks, _Errors) ->
+process_summary(_, _Elapsed, _Window, _Oks, _Errors) ->
     ok.
 
 report_error(_, _, _) ->
     ok.
 
-report_latency(InfluxDB, _Elapsed, _Window, Op, Stats, Errors, Units) ->
+report_latency({InfluxDB, Driver}, _Elapsed, _Window, Op, Stats, Errors, Units) ->
     case proplists:get_value(n, Stats) > 0 of
         true ->
             {Tags, Fields} = op_latencies(Op, Stats, Errors, Units),
-            basho_bench_influxdb:write(<<"latency">>, Tags, Fields, InfluxDB);
+            basho_bench_influxdb:write(<<"latency">>, [{driver, Driver}|Tags], Fields, InfluxDB);
         false ->
             ?WARN("No data for op: ~p\n", [Op])
     end.
@@ -119,3 +122,6 @@ op_latencies({Label, _Op}, Stats, Errors, Units) ->
               {successful, Units},
               {failed, Errors}],
     {Tags, Fields}.
+
+driver_name(Driver) when is_atom(Driver) ->
+    atom_to_list(Driver) -- "basho_bench_driver_".
