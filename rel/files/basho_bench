@@ -4,6 +4,6 @@
 . "{{runner_base_dir}}/lib/env.sh"
 
 # Make sure CWD is set to runner run dir
-cd $RUNNER_BASE_DIR/lib/basho_bench*/ebin
+cd $RUNNER_BASE_DIR
 
-ERL_LIBS=$RUNNER_BASE_DIR $ERTS_PATH/escript basho_bench.beam "$@"
+ERL_LIBS=$RUNNER_BASE_DIR $ERTS_PATH/escript lib/basho_bench*/ebin/basho_bench.beam "$@"
