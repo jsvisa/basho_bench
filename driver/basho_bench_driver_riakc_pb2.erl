@@ -77,6 +77,8 @@ new(Id) ->
     ?INFO("Using target ~p:~p for worker ~p\n", [TargetIp, TargetPort, Id]),
     case riakc_pb_socket:start_link(TargetIp, TargetPort, get_connect_options()) of
         {ok, Pid} ->
+            %% setting bucket's props as LWW=true
+            ok = riakc_pb_socket:set_bucket(Pid, Bucket, [{allow_mult, false}, {last_write_wins, true}]),
             {ok, #state { pid = Pid,
                           bucket = Bucket,
                           r = R,
