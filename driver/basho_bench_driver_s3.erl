@@ -19,7 +19,7 @@
 %% under the License.
 %%
 %% -------------------------------------------------------------------
--module(basho_bench_driver_reverse).
+-module(basho_bench_driver_s3).
 
 -export([new/1,
          run/4]).
@@ -52,12 +52,12 @@ new(Id) ->
 
     application:start(ibrowse),
 
-    Ips = basho_bench_config:get(reverse_ips, ["127.0.0.1"]),
-    DefaultPort = basho_bench_config:get(reverse_port, 8080),
-    Path = basho_bench_config:get(reverse_path, "/objects/reverse/bucket/key"),
-    Params = basho_bench_config:get(reverse_params, ""),
-    Disconnect = basho_bench_config:get(reverse_disconnect_frequency, infinity),
-    LogFile = basho_bench_config:get(reverse_log_file, "/tmp/access.log"),
+    Ips = basho_bench_config:get(s3_ips, ["127.0.0.1"]),
+    DefaultPort = basho_bench_config:get(s3_port, 8080),
+    Path = basho_bench_config:get(s3_path, "/objects/s3/bucket/key"),
+    Params = basho_bench_config:get(s3_params, ""),
+    Disconnect = basho_bench_config:get(s3_disconnect_frequency, infinity),
+    LogFile = basho_bench_config:get(s3_log_file, "/tmp/access.log"),
 
     case Disconnect of
         infinity ->
@@ -67,7 +67,7 @@ new(Id) ->
         {ops, Ops} when is_integer(Ops) ->
             ok;
         _ ->
-            ?FAIL_MSG("Invalid configuration for reverse_disconnect_frequency: ~p~n", [Disconnect])
+            ?FAIL_MSG("Invalid configuration for s3_disconnect_frequency: ~p~n", [Disconnect])
     end,
 
     %% Users pdict to avoid threading state record through lots of functions
@@ -351,9 +351,9 @@ send_request(_Url, _Headers, _Method, _Body, _Options, 0) ->
 send_request(Url, Headers, Method, Body, Options, Count) ->
     Pid = connect(Url),
     case catch(ibrowse_http_client:send_req(Pid, Url,
-                                            Headers ++ basho_bench_config:get(reverse_append_headers, []),
+                                            Headers ++ basho_bench_config:get(s3_append_headers, []),
                                             Method, Body, Options,
-                                            basho_bench_config:get(reverse_request_timeout, 5000))) of
+                                            basho_bench_config:get(s3_request_timeout, 5000))) of
         {ok, Status, RespHeaders, RespBody} ->
             maybe_disconnect(Url),
             {ok, Status, RespHeaders, RespBody};
