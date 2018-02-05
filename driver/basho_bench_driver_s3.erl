@@ -31,7 +31,8 @@
 -record(state, { base_urls,
                  log_device,
                  base_urls_index,
-                 path_params }).
+                 path_params,
+                 validate_length }).
 
 
 %% ====================================================================
@@ -58,6 +59,7 @@ new(Id) ->
     Params = basho_bench_config:get(s3_params, ""),
     Disconnect = basho_bench_config:get(s3_disconnect_frequency, infinity),
     LogFile = basho_bench_config:get(s3_log_file, "/tmp/access.log"),
+    ValidateLength = basho_bench_config:get(s3_validate_length, false),
 
     case Disconnect of
         infinity ->
@@ -84,13 +86,18 @@ new(Id) ->
     {ok, #state { base_urls = BaseUrls,
                   log_device = Device,
                   base_urls_index = BaseUrlsIndex,
-                  path_params = Params }}.
+                  path_params = Params,
+                  validate_length = ValidateLength }}.
 
 
-run(get, KeyGen, _ValueGen, #state{log_device=Device}=State) ->
+run(get, KeyGen, _ValueGen, #state{log_device=Device, validate_length=ValidateLength}=State) ->
     {NextUrl, S2} = next_url(State),
     Url = url(NextUrl, KeyGen, State#state.path_params),
-    case do_get(Url, Device, [{body_on_success, true}]) of
+    Props = case ValidateLength of
+                true -> [{body_on_success, true}];
+                false -> []
+            end,
+    case do_get(Url, Device, Props) of
         {ok, _Url, _Headers, _Body} ->
             {ok, S2};
         {ok, _Url, _Headers} ->
@@ -170,10 +177,11 @@ do_get(Url, IoDevice, Opts) ->
                 "200" ->
                     case proplists:get_bool(body_on_success, Opts) of
                         true ->
-                            {"content-length", L0} = lists:keyfind("content-length", 1, Header),
+                            Header0 = format_header(Header),
+                            {"content-length", L0} = lists:keyfind("content-length", 1, Header0),
                             Len = erlang:list_to_integer(L0),
                             case byte_size(Body) of
-                                Len -> {ok, Url, Header, Body};
+                                Len -> {ok, Url, Header0, Body};
                                 BoL -> {error, {{content_length, Len}, {body_length, BoL}}}
                             end;
                         false ->
@@ -382,3 +390,10 @@ normalize_error(Method, {'EXIT', Reason}) ->
     {error, {Method, 'EXIT', Reason}};
 normalize_error(Method, {error, Reason}) ->
     {error, {Method, Reason}}.
+
+format_header(Header) ->
+    format_header(Header, []).
+
+format_header([], Header) -> Header;
+format_header([{K, V}|Rest], Header) -> format_header(Rest, [{string:to_lower(K), V}|Header]).
+

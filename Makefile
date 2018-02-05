@@ -18,14 +18,8 @@ escriptize:
 	$(REBAR) skip_deps=true compile
 	$(REBAR) skip_deps=true escriptize
 
-reverse: all
-	./basho_bench examples/reverse.putget.config
-
-elena: all
-	./basho_bench examples/elena.config
-
 rel: deps compile
-	cd rel && $(REBAR) generate skip_deps=true $(OVERLAY_VARS)
+	cd rel && $(REBAR) generate skip_deps=false $(OVERLAY_VARS)
 
 deps:
 	$(REBAR) get-deps
